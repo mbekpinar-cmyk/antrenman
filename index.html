@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>System Monitor</title>
+
+  <meta name="x-icue-property" content="cpuLoadSensor" data-label="'CPU load sensor'"
+    data-type="sensors-combobox"
+    data-default="plugins.Sensorsdataprovider.getDefaultSensorIdBlock('load')" />
+  <meta name="x-icue-property" content="cpuTempSensor" data-label="'CPU temp sensor'"
+    data-type="sensors-combobox"
+    data-default="plugins.Sensorsdataprovider.getDefaultSensorIdBlock('temperature')" />
+  <meta name="x-icue-property" content="gpuLoadSensor" data-label="'GPU load sensor'"
+    data-type="sensors-combobox" data-default="''" />
+  <meta name="x-icue-property" content="gpuTempSensor" data-label="'GPU temp sensor'"
+    data-type="sensors-combobox" data-default="''" />
+  <meta name="x-icue-property" content="ramSensor" data-label="'RAM usage sensor'"
+    data-type="sensors-combobox" data-default="''" />
+  <meta name="x-icue-property" content="ramTotalGb" data-label="'Total RAM (GB)'"
+    data-type="slider" data-min="4" data-max="256" data-step="4" data-default="32" />
+  <meta name="x-icue-property" content="maxFps" data-label="'FPS gauge max'"
+    data-type="slider" data-min="60" data-max="360" data-step="10" data-default="144" />
+
+  <script type="application/json" id="x-icue-groups">
+    [
+      { "title": "'Sensors'",
+        "properties": ["cpuLoadSensor", "cpuTempSensor", "gpuLoadSensor", "gpuTempSensor", "ramSensor"] },
+      { "title": "'Display'",
+        "properties": ["ramTotalGb", "maxFps"] }
+    ]
+  </script>
+
+  <style>
+    :root {
+      --bg:      #000000;
+      --panel:   #0a0a0b;
+      --line:    #1c1c1f;
+      --line-2:  #262629;
+      --ink:     #f2f2f0;
+      --dim:     #6a6a6e;
+      --dimmer:  #48484c;
+      --accent:  #ffd200;   /* CORSAIR yellow */
+      --track:   #202023;
+      --good:    #8fe3ae;   /* pastel green */
+      --warn:    #ffd98e;   /* pastel amber */
+      --hot:     #ff9d9d;   /* pastel red   */
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 320px; height: 170px; }
+    body {
+      background: var(--bg); color: var(--ink);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      overflow: hidden; padding: 7px 52px 5px 10px;
+      display: flex; flex-direction: column;
+    }
+
+    /* header strip */
+    .top { display: flex; align-items: center; justify-content: space-between;
+      padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 6px; }
+    .sail { width: 11px; height: 11px; }
+    .title { font-size: 8px; letter-spacing: 2.4px; font-weight: 700;
+      text-transform: uppercase; color: var(--ink); }
+    .sub { font-size: 7px; letter-spacing: 1.6px; color: var(--dimmer);
+      text-transform: uppercase; font-weight: 600; }
+    .credit { display: inline-flex; align-items: center; gap: 3px;
+      letter-spacing: 0.3px; text-transform: none; font-size: 7.5px;
+      color: var(--dim); white-space: nowrap; }
+    .spark { width: 8px; height: 8px; flex-shrink: 0; }
+    .foot { flex-shrink: 0; padding-top: 3px; border-top: 1px solid var(--line);
+      display: flex; align-items: center; }
+
+    /* grid */
+    .grid { flex: 1; display: grid;
+      grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+      column-gap: 12px; row-gap: 0; padding-top: 2px; position: relative; }
+    .stat { display: flex; align-items: center; gap: 7px; position: relative; z-index: 1; }
+    .stat.tr, .stat.br { padding-left: 12px; }
+    /* vertical divider down the centre */
+    .grid::before { content: ""; position: absolute; top: 6px; bottom: 6px;
+      left: 50%; width: 1px; background: var(--line-2); }
+    /* horizontal divider between rows */
+    .grid::after { content: ""; position: absolute; left: 0; right: 0;
+      top: 50%; height: 1px; background: var(--line-2); }
+
+    .dial { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
+    .dial svg { width: 40px; height: 40px; transform: rotate(135deg); }
+    .dial .tk { stroke: var(--track); }
+    .dial .fg { stroke-linecap: round; transition: stroke-dashoffset .5s cubic-bezier(.4,0,.2,1), stroke .6s ease; }
+    .dial .pct { position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; font-size: 11px; font-weight: 700;
+      font-variant-numeric: tabular-nums; letter-spacing: -0.5px;
+      transition: color .6s ease; }
+
+    .meta { display: flex; flex-direction: column; min-width: 0; }
+    .k { font-size: 8px; letter-spacing: 2px; font-weight: 700; color: var(--dim);
+      text-transform: uppercase; line-height: 1; margin-bottom: 3px; }
+    .v { font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1;
+      font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
+    .v .u { font-size: 9px; color: var(--dim); font-weight: 600; margin-left: 1px; }
+    .d { font-size: 8px; color: var(--dimmer); margin-top: 3px; letter-spacing: 0.4px;
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+    /* horizontal divider between rows */
+    .grid .stat.bl::after, .grid .stat.br::after { }
+    .rowline { height: 1px; background: var(--line); margin: 0 0; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">
+      <svg class="sail" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2 L20 20 L12 16 L4 20 Z" fill="var(--accent)"/>
+      </svg>
+      <span class="title">System Monitor</span>
+    </div>
+    <span class="sub">Vanguard 96</span>
+  </div>
+
+  <div class="grid">
+    <!-- CPU -->
+    <div class="stat tl">
+      <div class="dial">
+        <svg viewBox="0 0 44 44">
+          <circle class="tk" cx="22" cy="22" r="19" fill="none" stroke-width="3" pathLength="100" stroke-dasharray="75 100"/>
+          <circle class="fg" id="cpu-arc" cx="22" cy="22" r="19" fill="none" stroke="var(--accent)" stroke-width="3" pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"/>
+        </svg>
+        <div class="pct" id="cpu-pct">--</div>
+      </div>
+      <div class="meta">
+        <span class="k">CPU</span>
+        <span class="v" id="cpu-load">--<span class="u">%</span></span>
+        <span class="d" id="cpu-temp">-- °C</span>
+      </div>
+    </div>
+
+    <!-- GPU -->
+    <div class="stat tr">
+      <div class="dial">
+        <svg viewBox="0 0 44 44">
+          <circle class="tk" cx="22" cy="22" r="19" fill="none" stroke-width="3" pathLength="100" stroke-dasharray="75 100"/>
+          <circle class="fg" id="gpu-arc" cx="22" cy="22" r="19" fill="none" stroke="var(--accent)" stroke-width="3" pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"/>
+        </svg>
+        <div class="pct" id="gpu-pct">--</div>
+      </div>
+      <div class="meta">
+        <span class="k">GPU</span>
+        <span class="v" id="gpu-load">--<span class="u">%</span></span>
+        <span class="d" id="gpu-temp">-- °C</span>
+      </div>
+    </div>
+
+    <!-- RAM -->
+    <div class="stat bl">
+      <div class="dial">
+        <svg viewBox="0 0 44 44">
+          <circle class="tk" cx="22" cy="22" r="19" fill="none" stroke-width="3" pathLength="100" stroke-dasharray="75 100"/>
+          <circle class="fg" id="ram-arc" cx="22" cy="22" r="19" fill="none" stroke="var(--accent)" stroke-width="3" pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"/>
+        </svg>
+        <div class="pct" id="ram-pct">--</div>
+      </div>
+      <div class="meta">
+        <span class="k">Memory</span>
+        <span class="v" id="ram-load">--<span class="u">%</span></span>
+        <span class="d" id="ram-sub">-- / 32 GB</span>
+      </div>
+    </div>
+
+    <!-- FPS -->
+    <div class="stat br">
+      <div class="dial">
+        <svg viewBox="0 0 44 44">
+          <circle class="tk" cx="22" cy="22" r="19" fill="none" stroke-width="3" pathLength="100" stroke-dasharray="75 100"/>
+          <circle class="fg" id="fps-arc" cx="22" cy="22" r="19" fill="none" stroke="var(--accent)" stroke-width="3" pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"/>
+        </svg>
+        <div class="pct" id="fps-pct">--</div>
+      </div>
+      <div class="meta">
+        <span class="k">FPS</span>
+        <span class="v" id="fps-val">--</span>
+        <span class="d" id="fps-sub">Desktop</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="credit">Designed by Mustafa Bekpinar &amp; made by Claude
+      <svg class="spark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2.6c.5 3.4 1.2 5.2 2.4 6.6 1.3 1.4 3 2.1 6.4 2.8-3.4.7-5.1 1.4-6.4 2.8-1.2 1.4-1.9 3.2-2.4 6.6-.5-3.4-1.2-5.2-2.4-6.6-1.3-1.4-3-2.1-6.4-2.8 3.4-.7 5.1-1.4 6.4-2.8 1.2-1.4 1.9-3.2 2.4-6.6z" fill="#D97757"/>
+      </svg>
+    </span>
+  </div>
+
+  <script>
+    // 270-degree dial: dasharray "75 100", offset 75 = empty, 0 = full
+    function setArc(id, frac) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var f = Math.min(Math.max(frac, 0), 1);
+      el.setAttribute("stroke-dashoffset", (75 - f * 75).toFixed(2));
+    }
+    function num(v){ var n = parseFloat(v); return isNaN(n) ? null : n; }
+    var C_GOOD = "#8fe3ae", C_WARN = "#ffd98e", C_HOT = "#ff9d9d", C_DIM = "#6a6a6e";
+    function loadColor(p){ return p < 50 ? C_GOOD : (p < 80 ? C_WARN : C_HOT); }
+    function tempColor(t){ return t < 60 ? C_GOOD : (t < 80 ? C_WARN : C_HOT); }
+    function fpsColor(f){ return f >= 60 ? C_GOOD : (f >= 30 ? C_WARN : C_HOT); }
+    function paint(arcId, pctId, color){
+      var a = document.getElementById(arcId); if (a) a.setAttribute("stroke", color);
+      var p = document.getElementById(pctId); if (p) p.style.color = color;
+    }
+    function ramTotal(){ return (typeof ramTotalGb !== "undefined" && ramTotalGb) ? ramTotalGb : 32; }
+
+    function makeAsyncApi(plugin) {
+      var nextId = 1, pending = {};
+      plugin.asyncResponse.connect(function (id, value) {
+        if (pending[id]) { var r = pending[id]; delete pending[id]; r(value); }
+      });
+      return function (method) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolve) {
+          var id = nextId++; pending[id] = resolve;
+          plugin[method].apply(plugin, [id].concat(args));
+        });
+      };
+    }
+
+    var sApi = null;
+    var auto = { gpuLoad: "", gpuTemp: "", ram: "" };
+
+    function val(name) {
+      try { if (typeof window[name] !== "undefined" && window[name]) return window[name]; } catch (e) {}
+      try { var v = Function('return typeof ' + name + '!=="undefined"?' + name + ':undefined')(); if (v) return v; } catch (e) {}
+      return "";
+    }
+    function pick(u, a){ return u ? u : a; }
+
+    async function detect() {
+      try {
+        var ids = await sApi("getAllSensorIds");
+        for (var i = 0; i < ids.length; i++) {
+          var id = ids[i], kind = "";
+          try { kind = String(await sApi("getSensorKind", id)); } catch (e) {}
+          if (kind === "gpu-load" && !auto.gpuLoad) auto.gpuLoad = id;
+          else if (kind === "gpu-temp" && !auto.gpuTemp) auto.gpuTemp = id;
+          else if (kind === "memory-load" && !auto.ram) auto.ram = id;
+        }
+      } catch (e) {}
+    }
+    async function readOne(id){ if(!id) return null; try { return num(await sApi("getSensorValue", id)); } catch(e){ return null; } }
+
+    async function poll() {
+      if (!sApi) return;
+      var cpuL = val("cpuLoadSensor"), cpuT = val("cpuTempSensor");
+      var gpuL = pick(val("gpuLoadSensor"), auto.gpuLoad);
+      var gpuT = pick(val("gpuTempSensor"), auto.gpuTemp);
+      var ram  = pick(val("ramSensor"), auto.ram);
+      var v;
+      v = await readOne(cpuL); if (v!==null){ document.getElementById("cpu-pct").textContent = Math.round(v); document.getElementById("cpu-load").innerHTML = Math.round(v)+'<span class="u">%</span>'; setArc("cpu-arc", v/100); paint("cpu-arc","cpu-pct",loadColor(v)); }
+      v = await readOne(cpuT); if (v!==null){ var e=document.getElementById("cpu-temp"); e.textContent = Math.round(v)+" \u00B0C"; e.style.color = tempColor(v); }
+      v = await readOne(gpuL); if (v!==null){ document.getElementById("gpu-pct").textContent = Math.round(v); document.getElementById("gpu-load").innerHTML = Math.round(v)+'<span class="u">%</span>'; setArc("gpu-arc", v/100); paint("gpu-arc","gpu-pct",loadColor(v)); }
+      v = await readOne(gpuT); if (v!==null){ var e=document.getElementById("gpu-temp"); e.textContent = Math.round(v)+" \u00B0C"; e.style.color = tempColor(v); }
+      v = await readOne(ram);  if (v!==null){ document.getElementById("ram-pct").textContent = Math.round(v); document.getElementById("ram-load").innerHTML = Math.round(v)+'<span class="u">%</span>'; setArc("ram-arc", v/100); paint("ram-arc","ram-pct",loadColor(v)); var t = ramTotal(); document.getElementById("ram-sub").textContent = ((v*t)/100).toFixed(1)+" / "+t+" GB"; }
+    }
+
+    function startSensors() {
+      if (sApi) return;
+      if (!window.plugins || !window.plugins.Sensorsdataprovider) return;
+      sApi = makeAsyncApi(window.plugins.Sensorsdataprovider);
+      detect().then(function(){ poll(); setInterval(poll, 1000); });
+    }
+    window.pluginSensorsdataproviderEvents = { onInitialized: startSensors };
+    if (typeof pluginSensorsdataprovider_initialized !== "undefined" && pluginSensorsdataprovider_initialized) startSensors();
+    var t=0, iv=setInterval(function(){ t++; if(sApi||t>20){clearInterval(iv);return;} startSensors(); },500);
+
+    // ================= ADAPTIVE FPS READER =================
+    // Discovers the FPS plugin at runtime, wires every signal it
+    // actually has, and polls its getters as backup. Doesn't depend
+    // on exact names being what the docs say.
+    (function () {
+      var fpsPlugin = null;
+      var pendingGet = {};
+      var reqId = 1;
+      var liveFps = null;
+      var getterNames = [];
+
+      function fpsCap(){ return (typeof maxFps !== "undefined" && maxFps) ? maxFps : 144; }
+
+      function showFps(n) {
+        liveFps = n;
+        if (n === null || n === undefined || isNaN(n) || n <= 0) {
+          document.getElementById("fps-pct").textContent = "--";
+          document.getElementById("fps-val").textContent = "--";
+          setArc("fps-arc", 0);
+          return;
+        }
+        var r = Math.round(n);
+        document.getElementById("fps-pct").textContent = r;
+        document.getElementById("fps-val").textContent = r;
+        setArc("fps-arc", Math.min(r / fpsCap(), 1));
+        paint("fps-arc","fps-pct",fpsColor(r));
+      }
+      function showApp(s) {
+        var n = s ? String(s) : "Desktop";
+        n = n.replace(/-Win64-Shipping$/i, "").replace(/-Win32-Shipping$/i, "").replace(/\.exe$/i, "");
+        document.getElementById("fps-sub").textContent = n || "Desktop";
+      }
+
+      function members(obj) {
+        var out = [];
+        try { for (var k in obj) out.push(k); } catch (e) {}
+        try {
+          var g = Object.getOwnPropertyNames(obj);
+          for (var i = 0; i < g.length; i++) if (out.indexOf(g[i]) < 0) out.push(g[i]);
+        } catch (e) {}
+        return out;
+      }
+
+      function findPlugin() {
+        if (!window.plugins) return null;
+        var known = ["Fpsdataprovider", "FpsDataProvider", "Fps", "fpsdataprovider"];
+        for (var i = 0; i < known.length; i++) {
+          try { if (window.plugins[known[i]]) return window.plugins[known[i]]; } catch (e) {}
+        }
+        var names = members(window.plugins);
+        for (var j = 0; j < names.length; j++) {
+          if (/fps/i.test(names[j])) {
+            try { if (window.plugins[names[j]]) return window.plugins[names[j]]; } catch (e) {}
+          }
+        }
+        return null;
+      }
+
+      function adopt(name, args) {
+        if (args.length !== 1) return;
+        var v = args[0];
+        if (typeof v === "boolean") {
+          if (/avail/i.test(name) && !v) { showFps(null); showApp(null); }
+          return;
+        }
+        var n = parseFloat(v);
+        if (!isNaN(n) && isFinite(n) && n >= 0 && n < 2000 &&
+            (/fps|frame/i.test(name) || typeof v === "number")) {
+          showFps(n > 0 ? n : null);
+          return;
+        }
+        if (typeof v === "string" && v && isNaN(parseFloat(v)) &&
+            /process|app|name|game/i.test(name)) {
+          showApp(v);
+        }
+      }
+
+      function wire(p) {
+        fpsPlugin = p;
+        var ms = members(p);
+        for (var i = 0; i < ms.length; i++) {
+          (function (name) {
+            var m;
+            try { m = p[name]; } catch (e) { return; }
+            if (m && typeof m.connect === "function") {
+              try {
+                m.connect(function () {
+                  var a = Array.prototype.slice.call(arguments);
+                  if (name === "asyncResponse" && a.length === 2) {
+                    var cb = pendingGet[a[0]];
+                    if (cb) { delete pendingGet[a[0]]; cb(a[1]); }
+                    return;
+                  }
+                  adopt(name, a);
+                });
+              } catch (e) {}
+            } else if (typeof m === "function" && /^get/i.test(name)) {
+              getterNames.push(name);
+            }
+          })(ms[i]);
+        }
+        // initial + periodic getter polling as a safety net
+        pollGetters();
+        setInterval(pollGetters, 1000);
+      }
+
+      function pollGetters() {
+        if (!fpsPlugin) return;
+        for (var i = 0; i < getterNames.length; i++) {
+          var name = getterNames[i];
+          if (!/fps|frame|process|app|avail/i.test(name)) continue;
+          (function (gname) {
+            var id = reqId++;
+            pendingGet[id] = function (v) { adopt(gname, [v]); };
+            try { fpsPlugin[gname].call(fpsPlugin, id); } catch (e) { delete pendingGet[id]; }
+          })(name);
+        }
+      }
+
+      function tryStart() {
+        if (fpsPlugin) return true;
+        var p = findPlugin();
+        if (p) { wire(p); return true; }
+        return false;
+      }
+
+      window.pluginFpsdataproviderEvents = { onInitialized: tryStart };
+      // brute discovery: fast for 30s, then slow forever (plugin may load late)
+      var n = 0;
+      var fast = setInterval(function () {
+        n++;
+        if (tryStart() || n > 60) clearInterval(fast);
+      }, 500);
+      setInterval(function () { tryStart(); }, 5000);
+      tryStart();
+    })();
+  </script>
+</body>
+</html>
